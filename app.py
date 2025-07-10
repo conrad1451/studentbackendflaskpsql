@@ -1,3 +1,4 @@
+# app.py
 # CHQ: Gemini AI generated this
 
 import os
@@ -15,7 +16,10 @@ app = Flask(__name__)
 # Configure CORS to allow requests from your React app
 # IMPORTANT: In a production deployment, replace "http://localhost:3000"
 # with the actual URL of your deployed React frontend.
-CORS(app, resources={r"/api/*": {"origins": ["http://localhost:3000", "http://localhost:3500","http://localhost:5173","http://localhost:5174"]}})
+# CORS(app, resources={r"/myapi/*": {"origins": ["http://localhost:3000", "http://localhost:3500","http://localhost:5173","http://localhost:5174"]}})
+# CORS(app, resources={r"/myapi/*": {"origins": ["http://localhost:5173","http://localhost:5174"]}})
+CORS(app, resources={r"/myapi/*": {"origins": "http://localhost:5173"}})
+
 
 # --- Database Connection ---
 def get_db_connection():
@@ -44,7 +48,7 @@ def get_db_connection():
 # --- API Endpoints for Students ---
 
 # GET all students
-@app.route('/api/students', methods=['GET'])
+@app.route('/myapi/students', methods=['GET'])
 def get_students():
     conn = None
     try:
@@ -76,7 +80,7 @@ def get_students():
             conn.close()
 
 # GET a single student by ID
-@app.route('/api/students/<int:student_id>', methods=['GET'])
+@app.route('/myapi/students/<int:student_id>', methods=['GET'])
 def get_student(student_id):
     conn = None
     try:
@@ -108,7 +112,7 @@ def get_student(student_id):
             conn.close()
 
 # POST a new student
-@app.route('/api/students', methods=['POST'])
+@app.route('/myapi/students', methods=['POST'])
 def add_student():
     data = request.get_json()
     first_name = data.get('first_name')
@@ -156,7 +160,7 @@ def add_student():
 
 
 # PUT (Update) a student
-@app.route('/api/students/<int:student_id>', methods=['PUT'])
+@app.route('/myapi/students/<int:student_id>', methods=['PUT'])
 def update_student(student_id):
     data = request.get_json()
     first_name = data.get('first_name')
@@ -203,7 +207,7 @@ def update_student(student_id):
             conn.close()
 
 # DELETE a student
-@app.route('/api/students/<int:student_id>', methods=['DELETE'])
+@app.route('/myapi/students/<int:student_id>', methods=['DELETE'])
 def delete_student(student_id):
     conn = None
     try:
