@@ -1,7 +1,7 @@
 # CHQ: Gemini AI generated this
 
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import psycopg2
 from dotenv import load_dotenv
@@ -233,6 +233,12 @@ def delete_student(student_id):
 @app.route('/')
 def home():
     return "Flask Student API is running!"
+
+@app.route('/favicon.ico')
+def favicon():
+    # This tells Flask to look for 'favicon.ico' within the 'static' folder
+    # The 'app.static_folder' attribute points to the configured static directory (defaulting to 'static')
+    return send_from_directory(app.static_folder, 'favicon.ico')
 
 if __name__ == '__main__':
     # Flask will automatically use the FLASK_APP and FLASK_ENV from .env
