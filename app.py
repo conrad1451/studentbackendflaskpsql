@@ -18,7 +18,7 @@ app = Flask(__name__)
 # with the actual URL of your deployed React frontend.
 # CORS(app, resources={r"/myapi/*": {"origins": ["http://localhost:3000", "http://localhost:3500","http://localhost:5173","http://localhost:5174"]}})
 # CORS(app, resources={r"/myapi/*": {"origins": ["http://localhost:5173","http://localhost:5174"]}})
-CORS(app, resources={r"/myapi/*": {"origins": "http://localhost:5173"}})
+CORS(app, resources={r"/myapi/*": {"origins": ["http://localhost:5173", "https://studentfrontendreact.vercel.app"]}})
 
 
 # --- Database Connection ---
