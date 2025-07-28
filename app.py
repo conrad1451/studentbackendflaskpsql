@@ -159,6 +159,76 @@ def add_student():
             conn.close()
 
 
+# CHQ: Gemini AI generated endpoint for patch
+# PATCH (Partially Update) a student
+@app.route('/myapi/students/<int:student_id>', methods=['PATCH'])
+def patch_student(student_id):
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided for update."}), 400
+
+    conn = None
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"error": "Database connection failed"}), 500
+
+        cur = conn.cursor()
+
+        # Build dynamic update query based on provided fields
+        set_clauses = []
+        update_values = []
+
+        if 'first_name' in data:
+            set_clauses.append("first_name = %s")
+            update_values.append(data['first_name'])
+        if 'last_name' in data:
+            set_clauses.append("last_name = %s")
+            update_values.append(data['last_name'])
+        if 'email' in data:
+            set_clauses.append("email = %s")
+            update_values.append(data['email'])
+        if 'major' in data:
+            set_clauses.append("major = %s")
+            update_values.append(data['major'])
+        # Add other fields here if you have more that can be updated
+
+        if not set_clauses:
+            return jsonify({"error": "No valid fields provided for update."}), 400
+
+        # Add student_id to the end of update_values for the WHERE clause
+        update_values.append(student_id)
+
+        query = f'UPDATE students SET {", ".join(set_clauses)} WHERE id = %s RETURNING *'
+        cur.execute(query, tuple(update_values))
+        updated_student = cur.fetchone()
+        conn.commit()
+        cur.close()
+
+        if updated_student is None:
+            return jsonify({"error": "Student not found or no changes applied."}), 404
+
+        updated_student_data = {
+            "id": updated_student[0],
+            "first_name": updated_student[1],
+            "last_name": updated_student[2],
+            "email": updated_student[3],
+            "major": updated_student[4],
+            "enrollment_date": updated_student[5].isoformat()
+        }
+        return jsonify(updated_student_data)
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return jsonify({"error": "Email already exists for another student."}), 409
+    except Exception as e:
+        conn.rollback()
+        print(f"Error patching student: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+    finally:
+        if conn:
+            conn.close()
+
+
 # PUT (Update) a student
 @app.route('/myapi/students/<int:student_id>', methods=['PUT'])
 def update_student(student_id):
