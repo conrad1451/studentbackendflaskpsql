@@ -123,6 +123,13 @@ def logout():
     response.delete_cookie('sessionToken')
     return response
 
+
+# Basic route to check if the server is running
+@app.route('/')
+def home():
+    return "This is for authenticating users before they can access data!"
+
+
 if __name__ == '__main__':
     # For local development, you might set a .env file with JWT_SECRET
     # and run with `flask run`.
