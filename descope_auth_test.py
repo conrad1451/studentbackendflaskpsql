@@ -6,11 +6,14 @@
 # -------------------------------------------------------------------------------------------------------------------
 
 from flask import Flask, request, jsonify, make_response
-from descope import DescopeClient, DescopeException
 import os
 import jwt
 import psycopg2
 from datetime import datetime, timedelta
+
+# Corrected imports
+from descope import DescopeClient
+from descope.exceptions import DescopeException
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
