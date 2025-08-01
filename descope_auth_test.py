@@ -1,8 +1,8 @@
-# CHQ: Gemini AI generated this file
 # app.py
 # -------------------------------------------------------------------------------------------------------------------
-# This file contains the complete Flask backend application for handling Descope authentication,
-# session management with HTTP-only cookies, and database interaction with a Neon PostgreSQL database.
+# This file contains the complete Flask backend application, now updated to handle multiple
+# allowed frontend origins for CORS. This is essential for supporting both local development
+# and production environments.
 # -------------------------------------------------------------------------------------------------------------------
 
 from flask import Flask, request, jsonify, make_response
@@ -20,14 +20,18 @@ load_dotenv()
 app = Flask(__name__)
 # Get environment variables
 NEON_DB_URL = os.environ.get('NEON_DB_URL')
-FRONTEND_URL = os.environ.get('FRONTEND_URL')
+# We now use a comma-separated list for allowed origins
+ALLOWED_ORIGINS_STR = os.environ.get('ALLOWED_ORIGINS')
 DESCOPE_PROJECT_ID = os.environ.get('DESCOPE_PROJECT_ID')
 DESCOPE_ACCESS_KEY = os.environ.get('DESCOPE_ACCESS_KEY')
 APP_SECRET_KEY = os.environ.get('APP_SECRET_KEY')
 
 # Check if all required environment variables are set
-if not all([NEON_DB_URL, FRONTEND_URL, DESCOPE_PROJECT_ID, DESCOPE_ACCESS_KEY, APP_SECRET_KEY]):
+if not all([NEON_DB_URL, ALLOWED_ORIGINS_STR, DESCOPE_PROJECT_ID, DESCOPE_ACCESS_KEY, APP_SECRET_KEY]):
     raise EnvironmentError("One or more required environment variables are missing. Please check your .env file.")
+
+# Parse the comma-separated string into a list of allowed origins
+ALLOWED_ORIGINS = [origin.strip() for origin in ALLOWED_ORIGINS_STR.split(',')]
 
 # Initialize the Descope client
 try:
@@ -36,6 +40,17 @@ except DescopeException as e:
     print(f"Failed to initialize DescopeClient: {e}")
     descope_client = None
 
+# --- Helper function to get the allowed origin for the current request ---
+# This is crucial for handling multiple origins correctly in the headers.
+def get_request_origin():
+    """
+    Returns the origin of the current request if it is in the list of ALLOWED_ORIGINS.
+    Returns None otherwise.
+    """
+    request_origin = request.headers.get('Origin')
+    if request_origin and request_origin in ALLOWED_ORIGINS:
+        return request_origin
+    return None
 
 # --- Database Initialization ---
 # This function creates the 'users' table if it doesn't already exist.
@@ -61,32 +76,30 @@ def init_db():
         if conn:
             conn.close()
 
-
-# --- CORS Preflight Handling ---
+# --- CORS Preflight Handling (Updated for multiple origins) ---
 # Essential for cross-origin requests from your frontend. This handles the OPTIONS requests.
 @app.before_request
 def handle_options_requests():
     if request.method == 'OPTIONS':
-        if FRONTEND_URL:
+        allowed_origin = get_request_origin()
+        if allowed_origin:
             response = make_response()
-            response.headers.add('Access-Control-Allow-Origin', FRONTEND_URL)
+            response.headers.add('Access-Control-Allow-Origin', allowed_origin)
             response.headers.add('Access-Control-Allow-Headers', 'Content-Type, Authorization')
             response.headers.add('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
             response.headers.add('Access-Control-Allow-Credentials', 'true') # Required for cookies
             return response
         else:
-            return "CORS configuration missing.", 500
-
+            # If the origin is not allowed, return a 403 Forbidden
+            return "CORS origin not allowed.", 403
 
 # --- User Registration / Login (handled by Descope SSO callback) ---
 @app.route('/api/auth/descope-sso-callback', methods=['POST'])
 def sso_callback():
-    """
-    This endpoint is called by the frontend after a successful Descope SSO login.
-    It receives the Descope JWT, validates it, and then creates or updates a user
-    in the PostgreSQL database. It then issues and sets an application-specific
-    HTTP-only session cookie for the user.
-    """
+    allowed_origin = get_request_origin()
+    if not allowed_origin:
+        return "CORS origin not allowed.", 403
+
     if not descope_client:
         return jsonify({"error": "Descope client not initialized."}), 500
 
@@ -98,7 +111,6 @@ def sso_callback():
             return jsonify({"error": "No session token provided."}), 400
 
         # Validate the Descope JWT
-        # The SDK will verify the token's signature, expiry, and audience.
         validated_token = descope_client.validate_jwt(descope_jwt)
         descope_user_id = validated_token['sub']
         user_email = validated_token['email']
@@ -106,22 +118,18 @@ def sso_callback():
 
         conn = None
         try:
-            # Connect to the database
             conn = psycopg2.connect(NEON_DB_URL)
             cur = conn.cursor()
 
-            # Check if user already exists
             cur.execute("SELECT descope_user_id FROM users WHERE descope_user_id = %s", (descope_user_id,))
             user = cur.fetchone()
 
             if user:
-                # Update last login time for existing user
                 cur.execute(
                     "UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE descope_user_id = %s",
                     (descope_user_id,)
                 )
             else:
-                # Create a new user
                 cur.execute(
                     "INSERT INTO users (descope_user_id, email, name) VALUES (%s, %s, %s)",
                     (descope_user_id, user_email, user_name)
@@ -130,43 +138,36 @@ def sso_callback():
             conn.commit()
 
         except Exception as db_error:
-            conn.rollback() # Rollback in case of error
+            conn.rollback()
             print(f"Database error: {db_error}")
             return jsonify({"error": "Database operation failed."}), 500
         finally:
             if conn:
                 conn.close()
 
-        # --- Create and set a secure, HTTP-only session cookie ---
-        # Generate your own application-specific JWT
-        # This JWT will contain minimal, trusted user data and will be used for your session.
         session_payload = {
             'sub': descope_user_id,
             'email': user_email,
-            'exp': datetime.utcnow() + timedelta(hours=24) # Session expires in 24 hours
+            'exp': datetime.utcnow() + timedelta(hours=24)
         }
         session_token = jwt.encode(session_payload, APP_SECRET_KEY, algorithm='HS256')
         
-        # Create a Flask response object
         response = jsonify({
             "message": "Login successful",
             "email": user_email,
             "name": user_name
         })
 
-        # Set the session token as an HTTP-only cookie
-        # This is the most secure way to handle session tokens.
         response.set_cookie(
             'sessionToken',
             value=session_token,
             httponly=True,
-            samesite='Lax', # Protects against some CSRF attacks
-            secure=True, # Requires HTTPS
-            max_age=timedelta(hours=24) # Matches token expiry
+            samesite='Lax',
+            secure=True,
+            max_age=timedelta(hours=24)
         )
 
-        # Allow CORS
-        response.headers.add('Access-Control-Allow-Origin', FRONTEND_URL)
+        response.headers.add('Access-Control-Allow-Origin', allowed_origin)
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         
         return response, 200
@@ -182,45 +183,40 @@ def sso_callback():
 # --- Protected Endpoint Example ---
 @app.route('/api/user-data', methods=['GET'])
 def get_user_data():
-    """
-    An example of a protected endpoint that requires a valid session cookie.
-    It retrieves the session token from the cookie, verifies it, and
-    returns a user-specific greeting.
-    """
+    allowed_origin = get_request_origin()
+    if not allowed_origin:
+        return "CORS origin not allowed.", 403
+
     try:
-        # Get the session token from the cookies
         session_token = request.cookies.get('sessionToken')
         
         if not session_token:
             return jsonify({"error": "Unauthorized"}), 401
         
-        # Decode and verify the session token using your secret key
         payload = jwt.decode(session_token, APP_SECRET_KEY, algorithms=['HS256'])
         user_email = payload.get('email')
 
-        # Create a response with user-specific data
         response = jsonify({"message": f"Hello, {user_email}! This is protected data."})
 
-        # Add CORS headers for the response
-        response.headers.add('Access-Control-Allow-Origin', FRONTEND_URL)
+        response.headers.add('Access-Control-Allow-Origin', allowed_origin)
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         
         return response, 200
 
     except jwt.ExpiredSignatureError:
         response = jsonify({"error": "Session expired, please log in again."})
-        response.headers.add('Access-Control-Allow-Origin', FRONTEND_URL)
+        response.headers.add('Access-Control-Allow-Origin', allowed_origin)
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response, 401
     except jwt.InvalidTokenError:
         response = jsonify({"error": "Invalid session token."})
-        response.headers.add('Access-Control-Allow-Origin', FRONTEND_URL)
+        response.headers.add('Access-Control-Allow-Origin', allowed_origin)
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response, 401
     except Exception as e:
         print(f"Error accessing protected endpoint: {e}")
         response = jsonify({"error": "An internal server error occurred."})
-        response.headers.add('Access-Control-Allow-Origin', FRONTEND_URL)
+        response.headers.add('Access-Control-Allow-Origin', allowed_origin)
         response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response, 500
 
@@ -228,16 +224,15 @@ def get_user_data():
 # --- Logout Endpoint ---
 @app.route('/api/logout', methods=['POST'])
 def logout():
-    """
-    Logs out the user by deleting the session cookie.
-    """
+    allowed_origin = get_request_origin()
+    if not allowed_origin:
+        return "CORS origin not allowed.", 403
+
     response = jsonify({"message": "Successfully logged out."})
     
-    # Delete the HTTP-only session cookie
     response.delete_cookie('sessionToken', httponly=True, samesite='Lax', secure=True)
 
-    # Add CORS headers for the response
-    response.headers.add('Access-Control-Allow-Origin', FRONTEND_URL)
+    response.headers.add('Access-Control-Allow-Origin', allowed_origin)
     response.headers.add('Access-Control-Allow-Credentials', 'true')
 
     return response, 200
@@ -246,15 +241,10 @@ def logout():
 # --- Health Check (good for Render) ---
 @app.route('/health')
 def health_check():
-    """
-    Simple health check endpoint for monitoring purposes.
-    """
     return "OK", 200
 
 
 # --- Main entry point for Flask app ---
 if __name__ == '__main__':
-    # Initialize the database when the app starts
     init_db()
-    # Run the Flask app
     app.run(host='0.0.0.0', port=5000, debug=True)
