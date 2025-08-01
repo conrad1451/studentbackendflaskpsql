@@ -314,6 +314,16 @@ def favicon():
     # The 'app.static_folder' attribute points to the configured static directory (defaulting to 'static')
     return send_from_directory(app.static_folder, 'favicon.ico')
 
+
+# --- Health Check (good for Render) ---
+@app.route('/health')
+def health_check():
+    """
+    Simple health check endpoint for monitoring purposes.
+    """
+    return "OK", 200
+
+
 if __name__ == '__main__':
     # Flask will automatically use the FLASK_APP and FLASK_ENV from .env
     # when run with 'flask run'. For direct execution, you can specify port.
